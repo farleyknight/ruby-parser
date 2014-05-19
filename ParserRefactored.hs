@@ -1,4 +1,4 @@
-module Parser where
+module ParserRefactored where
 
 import RubyParser
 
@@ -6,20 +6,6 @@ import Data.Text hiding (unlines)
 import Data.Functor
 import Control.Monad
 import Text.ParserCombinators.Parsec
-
-symbol :: Parser Expression
-symbol = do
-  char ':'
-  n     <- name
-  return (Symbol n)
-
-
-quotedString :: Parser String
-quotedString = do
-  char '"'
-  p <- many (noneOf "\"")
-  char '"'
-  return p
 
 (<*>) :: Monad m => m t1 -> m t2 -> m (t1, t2)
 a <*> b = do
@@ -40,66 +26,60 @@ a *> b = do
   return y
 
 readInt :: String -> Int
-readInt x = (read x :: Int)
+readInt x = read x :: Int
+
+symbol :: Parser Expression
+symbol = Symbol <$> ((char ':') *> name)
+
+quotedString :: Parser String
+quotedString = (char '"') *> (many (noneOf "\"")) <* (char '"')
 
 instanceVariable :: Parser Expression
-instanceVariable = do
-  char '@'
-  n <- name
-  return (InstanceVariable n)
-
+instanceVariable = InstanceVariable <$> ((char '@') *> name)
 
 name :: Parser String
-name = do
-  first <- letter
-  rest  <- many alphaNum
-  return (first : rest)
+name = (uncurry (:)) <$> (letter <*> (many alphaNum))
 
 globalVariable :: Parser Expression
-globalVariable = do
-  char '$'
-  n <- name
-  return (GlobalVariable n)
+globalVariable = char <$> ((GlobalVariable '$') *> name)
 
 localVariable :: Parser Expression
-localVariable = liftM Variable name
+localVariable = Variable <$> name
 
 variable :: Parser Expression
 variable = globalVariable <|> instanceVariable <|> localVariable
 
 integer :: Parser Expression
-integer = do
-  n <- many1 digit
-  return (Integer (readInt n))
+integer = (Integer . readInt) <$> (many1 digit)
 
 literal :: Parser Expression
 literal = integer <|> symbol
 
-padded :: Parser a -> Parser ()
-padded f = (spaces >> f >> spaces)
-
 equalsSign :: Parser Char
 equalsSign = char '='
 
+padded :: Parser a -> Parser ()
+padded f = spaces >> f >> spaces
+
 assignment :: Parser Expression
-assignment = do
-  var <- variable
-  spaces
-  char '='
-  spaces
-  val <- (try assignment) <|> literal <|> variable
-  return (Assignment var val)
+assignment =
+  (uncurry Assignment) <$> (variable <* (padded equalsSign) <*> value)
 
 value :: Parser Expression
 value = literal <|> (try expression) <|> (try assignment) <|> variable
 
+operator :: Parser Char
+operator = lessThan <|> lessThan
+
+-- comparison :: Parser Expression
+comparison = do
+  integer <*> (spaces *> operator <* spaces) <*> integer
+
+
 expression :: Parser Expression
-expression = do
-  spaces
-  e <- (try assignment) <|> variable <|> literal
-  spaces
-  eof
-  return e
+expression = spaces *> statement <* (spaces >> eof)
+  where
+    statement = (try assignment) <|> literal <|> variable <|> value
 
 main :: IO ()
 main = runTests (parseExpr expression)
